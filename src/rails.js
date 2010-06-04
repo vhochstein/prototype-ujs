@@ -6,13 +6,13 @@ document.on("dom:loaded", function() {
     if (event.stopped) return false;
 
     if (element.tagName.toLowerCase() === 'form') {
-      method = element.readAttribute('method') || 'post';
-      url    = element.readAttribute('action');
-      params = element.serialize(true);
+      method = event.memo.method || element.readAttribute('method') || 'post';
+      url    = event.memo.url || element.readAttribute('action');
+      params = event.memo.params || element.serialize(true);
     } else {
-      method = element.readAttribute('data-method') || 'get';
-      url    = element.readAttribute('href');
-      params = {};
+      method = event.memo.method || element.readAttribute('data-method') || 'get';
+      url    = event.memo.url || element.readAttribute('href');
+      params = event.memo.params || {};
     }
 
     new Ajax.Request(url, {
