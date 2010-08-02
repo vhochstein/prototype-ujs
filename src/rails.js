@@ -1,4 +1,76 @@
-document.on("dom:loaded", function() {
+(function() {
+  // Technique from Juriy Zaytsev
+  // http://thinkweb2.com/projects/prototype/detecting-event-support-without-browser-sniffing/
+  function isEventSupported(eventName) {
+    var el = document.createElement('div');
+    eventName = 'on' + eventName;
+    var isSupported = (eventName in el);
+    if (!isSupported) {
+      el.setAttribute(eventName, 'return;');
+      isSupported = typeof el[eventName] == 'function';
+    }
+    el = null;
+    return isSupported;
+  }
+
+  function isForm(element) {
+    return Object.isElement(element) && element.nodeName.toUpperCase() == 'FORM';
+  }
+
+  function isInput(element) {
+    if (Object.isElement(element)) {
+      var name = element.nodeName.toUpperCase();
+      return name == 'INPUT' || name == 'SELECT' || name == 'TEXTAREA';
+    }
+    else return false;
+  }
+
+  var submitBubbles = isEventSupported('submit'),
+      changeBubbles = isEventSupported('change');
+
+  if (!submitBubbles || !changeBubbles) {
+    // augment the Event.Handler class to observe custom events when needed
+    Event.Handler.prototype.initialize = Event.Handler.prototype.initialize.wrap(
+      function(init, element, eventName, selector, callback) {
+        init(element, eventName, selector, callback);
+        // is the handler being attached to an element that doesn't support this event?
+        if ( (!submitBubbles && this.eventName == 'submit' && !isForm(this.element)) ||
+             (!changeBubbles && this.eventName == 'change' && !isInput(this.element)) ) {
+          // "submit" => "emulated:submit"
+          this.eventName = 'emulated:' + this.eventName;
+        }
+      }
+    );
+  }
+
+  if (!submitBubbles) {
+    // discover forms on the page by observing focus events which always bubble
+    document.on('focusin', 'form', function(focusEvent, form) {
+      // special handler for the real "submit" event (one-time operation)
+      if (!form.retrieve('emulated:submit')) {
+        form.on('submit', function(submitEvent) {
+          var emulated = form.fire('emulated:submit', submitEvent, true);
+          // if custom event received preventDefault, cancel the real one too
+          if (emulated.returnValue === false) submitEvent.preventDefault();
+        });
+        form.store('emulated:submit', true);
+      }
+    });
+  }
+
+  if (!changeBubbles) {
+    // discover form inputs on the page
+    document.on('focusin', 'input, select, texarea', function(focusEvent, input) {
+      // special handler for real "change" events
+      if (!input.retrieve('emulated:change')) {
+        input.on('change', function(changeEvent) {
+          input.fire('emulated:change', changeEvent, true);
+        });
+        input.store('emulated:change', true);
+      }
+    });
+  }
+
   function handleRemote(element) {
     var method, url, params;
 
@@ -8,7 +80,7 @@ document.on("dom:loaded", function() {
     if (element.tagName.toLowerCase() === 'form') {
       method = event.memo.method || element.readAttribute('method') || 'post';
       url    = event.memo.url || element.readAttribute('action');
-      params = event.memo.params || element.serialize(true);
+      params = event.memo.params || element.serialize();
     } else {
       method = event.memo.method || element.readAttribute('data-method') || 'get';
       url    = event.memo.url || element.readAttribute('href');
@@ -31,6 +103,10 @@ document.on("dom:loaded", function() {
     element.fire("ajax:after");
   }
 
+  function insertHiddenField(form, name, value) {
+    form.insert(new Element('input', { type: 'hidden', name: name, value: value }));
+  }
+
   function handleMethod(element) {
     var method = element.readAttribute('data-method'),
         url = element.readAttribute('href'),
@@ -41,15 +117,11 @@ document.on("dom:loaded", function() {
     element.parentNode.insert(form);
 
     if (method !== 'post') {
-      var field = new Element('input', { type: 'hidden', name: '_method', value: method });
-      form.insert(field);
+      insertHiddenField(form, '_method', method);
     }
 
     if (csrf_param) {
-      var param = csrf_param.readAttribute('content'),
-          token = csrf_token.readAttribute('content'),
-          field = new Element('input', { type: 'hidden', name: param, value: token });
-      form.insert(field);
+      insertHiddenField(form, csrf_param.readAttribute('content'), csrf_token.readAttribute('content'));
     }
 
     form.submit();
@@ -73,35 +145,29 @@ document.on("dom:loaded", function() {
     event.stop();
   });
 
-  // TODO: Submit does not bubble in IE
   document.on("submit", function(event) {
-    var element = event.findElement(),
-        message = element.readAttribute('data-confirm');
+    var form = event.findElement(),
+        message = form.readAttribute('data-confirm');
+
     if (message && !confirm(message)) {
       event.stop();
       return false;
     }
 
-    var inputs = element.select("input[type=submit][data-disable-with]");
-    inputs.each(function(input) {
-      input.disabled = true;
-      input.writeAttribute('data-original-value', input.value);
-      input.value = input.readAttribute('data-disable-with');
+    form.select('input[type=submit][data-disable-with]').each(function(input) {
+      input.store('rails:original-value', input.getValue());
+      input.disable().setValue(input.readAttribute('data-disable-with'));
     });
 
-    var element = event.findElement("form[data-remote]");
-    if (element) {
-      handleRemote(element);
+    if (form.readAttribute('data-remote')) {
+      handleRemote(form);
       event.stop();
     }
   });
 
-  document.on("ajax:after", "form", function(event, element) {
-    var inputs = element.select("input[type=submit][disabled=true][data-disable-with]");
-    inputs.each(function(input) {
-      input.value = input.readAttribute('data-original-value');
-      input.removeAttribute('data-original-value');
-      input.disabled = false;
+  document.on("ajax:after", "form", function(event, form) {
+    form.select('input[type=submit][data-disable-with]').each(function(input) {
+      input.setValue(input.retrieve('rails:original-value')).enable();
     });
   });
-});
+})();
