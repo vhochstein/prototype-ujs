@@ -133,7 +133,7 @@
     if (!confirm(message)) event.stop();
   });
 
-  document.on("click", "a[data-remote]", function(event, element) {
+  document.on("click", "a[data-remote],input[data-remote]", function(event, element) {
     if (event.stopped) return;
     handleRemote(element);
     event.stop();
