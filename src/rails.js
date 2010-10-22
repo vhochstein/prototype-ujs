@@ -79,11 +79,14 @@
 
     if (element.tagName.toLowerCase() === 'form') {
       method = event.memo.method || element.readAttribute('method') || 'post';
-      url    = event.memo.url || element.readAttribute('action');
-      params = event.memo.params || element.serialize();
+      url = event.memo.url || element.readAttribute('action');
+      // serialize the form with respect to the submit button that was pressed
+      params = event.memo.params || element.serialize({ submit: element.retrieve('rails:submit-button') });
+      // clear the pressed submit button information
+      element.store('rails:submit-button', null);
     } else {
       method = event.memo.method || element.readAttribute('data-method') || 'get';
-      url    = event.memo.url || element.readAttribute('href');
+      url = event.memo.url || element.readAttribute('href');
       params = event.memo.params || {};
     }
 
@@ -92,12 +95,10 @@
       parameters: params,
       evalScripts: true,
 
-      onLoading:     function(request) { element.fire("ajax:loading", {request: request}); },
-      onLoaded:      function(request) { element.fire("ajax:loaded", {request: request}); },
-      onInteractive: function(request) { element.fire("ajax:interactive", {request: request}); },
-      onComplete:    function(request) { element.fire("ajax:complete", {request: request}); },
-      onSuccess:     function(request) { element.fire("ajax:success", {request: request}); },
-      onFailure:     function(request) { element.fire("ajax:failure", {request: request}); }
+      onCreate:   function(response) { element.fire("ajax:create",   response); },
+      onComplete: function(response) { element.fire("ajax:complete", response); },
+      onSuccess:  function(response) { element.fire("ajax:success",  response); },
+      onFailure:  function(response) { element.fire("ajax:failure",  response); }
     });
 
     element.fire("ajax:after");
@@ -127,47 +128,65 @@
     form.submit();
   }
 
+  function disableFormElements(form) {
+    form.select('input[type=submit][data-disable-with]').each(function(input) {
+      input.store('rails:original-value', input.getValue());
+      input.setValue(input.readAttribute('data-disable-with')).disable();
+    });
+  }
+  
+  function enableFormElements(form) {
+    form.select('input[type=submit][data-disable-with]').each(function(input) {
+      input.setValue(input.retrieve('rails:original-value')).enable();
+    });
+  }
 
-  document.on("click", "*[data-confirm]", function(event, element) {
+  function allowAction(element) {
     var message = element.readAttribute('data-confirm');
-    if (!confirm(message)) event.stop();
-  });
+    return !message || confirm(message);
+  }
 
-  document.on("click", "a[data-remote],input[data-remote]", function(event, element) {
-    if (event.stopped) return;
-    handleRemote(element);
-    event.stop();
-  });
-
-  document.on("click", "a[data-method]", function(event, element) {
-    if (event.stopped) return;
-    handleMethod(element);
-    event.stop();
-  });
-
-  document.on("submit", function(event) {
-    var form = event.findElement(),
-        message = form.readAttribute('data-confirm');
-
-    if (message && !confirm(message)) {
+  document.on('click', 'a[data-confirm], a[data-remote], a[data-method]', function(event, link) {
+    if (!allowAction(link)) {
       event.stop();
       return false;
     }
 
-    form.select('input[type=submit][data-disable-with]').each(function(input) {
-      input.store('rails:original-value', input.getValue());
-      input.disable().setValue(input.readAttribute('data-disable-with'));
-    });
-
-    if (form.readAttribute('data-remote')) {
-      handleRemote(form);
+    if (link.readAttribute('data-remote')) {
+      handleRemote(link);
+      event.stop();
+    } else if (link.readAttribute('data-method')) {
+      handleMethod(link);
       event.stop();
     }
   });
 
-  document.on("ajax:after", "form", function(event, form) {
-    form.select('input[type=submit][data-disable-with]').each(function(input) {
-      input.setValue(input.retrieve('rails:original-value')).enable();
-    });
+  document.on("click", "form input[type=submit], form button[type=submit], form button:not([type])", function(event, button) {
+    // register the pressed submit button
+    event.findElement('form').store('rails:submit-button', button.name || false);
+  });
+
+  document.on("submit", function(event) {
+    var form = event.findElement();
+
+    if (!allowAction(form)) {
+      event.stop();
+      return false;
+    }
+
+    if (form.readAttribute('data-remote')) {
+      handleRemote(form);
+      event.stop();
+    } else {
+      disableFormElements(form);
+    }
+  });
+
+  document.on('ajax:create', 'form', function(event, form) {
+    if (form == event.findElement()) disableFormElements(form);
+  });
+  
+  document.on('ajax:complete', 'form', function(event, form) {
+    if (form == event.findElement()) enableFormElements(form);
   });
 })();
