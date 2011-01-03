@@ -146,7 +146,7 @@
     return !message || confirm(message);
   }
 
-  document.on('click', 'a[data-confirm], a[data-remote], a[data-method]', function(event, link) {
+  document.on('click', 'a[data-confirm], a[data-remote], a[data-method], input[data-remote]', function(event, link) {
     if (!allowAction(link)) {
       event.stop();
       return false;
